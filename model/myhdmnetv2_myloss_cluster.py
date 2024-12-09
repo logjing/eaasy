@@ -24,7 +24,7 @@ import numpy as np
 
 cos = nn.CosineSimilarity(dim=1,eps=1e-6)
 
-def get_query_prototype(supp_prototype, supp_feat):
+def get_query_prototype(supp_prototype, query_feat):
     """
     Args:
         C=64
@@ -36,11 +36,11 @@ def get_query_prototype(supp_prototype, supp_feat):
     """
     n_clusters = 4
     # start = time.time()
-    kmeans = KMeans(n_clusters=n_clusters, random_state=0).fit(supp_feat)
+    kmeans = KMeans(n_clusters=n_clusters, random_state=0).fit(query_feat)
     # print(time.time() - start)
     prototype = []
     for i in range(len(np.unique(kmeans.labels_))):
-        prototype.append(np.mean(supp_feat[kmeans.labels_ == i], axis=0)) #计算聚类中心
+        prototype.append(np.mean(query_feat[kmeans.labels_ == i], axis=0)) #计算聚类中心
     score = []
     for i in range(len(prototype)): #计算每个聚类中心的score
         score.append(nn.CosineSimilarity(dim=0, eps=1e-6)
