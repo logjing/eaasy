@@ -201,6 +201,8 @@ class SemData(Dataset):
         # random.shuffle(self.data_list)
         if(self.base_data_root.split("\\")[-1]!='pascal'):
             self.data_list = random.sample(self.data_list, 3000) # coco数据集太大，先读取5000个数据集
+        self.last_mask = [] #保存上一个epoch时预测的标签，
+
 
         #将data_list保存到本地中，为了结果可视化
         with open(r"C:\Users\Administrator\Desktop\result\pascal\data_list.pkl", 'wb') as f:

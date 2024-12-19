@@ -15,12 +15,22 @@ from model.PSPNet import OneModel as PSPNet
 from einops import rearrange
 from torch.nn.functional import cosine_similarity as cosine
 from torch.nn.functional import softmax
+import numpy as np
 import clip
 import time
 from torch.cuda.amp import autocast,GradScaler
 import pdb
+from util.two_pass import two_pass
 
 cos = nn.CosineSimilarity(dim=1,eps=1e-6)
+
+#query_prototype = query_prototype_generation(ms=mask(bs*shot,1,633,633),
+#                           fs=supp_feat(bs*shot,64,80,80),
+#                           fq=query_feat(bs*shot,64,80,80))
+
+
+
+
 
 
 class GIG(nn.Module):
@@ -257,34 +267,6 @@ class CrossAttention2D(nn.Module):
 # output = cross_attention_2d(query_img, key_img, value_img)
 # print(output.shape)  # 输出形状应为 (batch_size, C, H, W)
 
-# class SimpleCNN(nn.Module):
-#     def __init__(self, in_channels, out_channels):
-#         super(SimpleCNN, self).__init__()
-#         self.conv1 = nn.Conv2d(in_channels, 32, kernel_size=3, padding=1)
-#         self.relu = nn.ReLU(inplace=True)
-#         self.conv2 = nn.Conv2d(32, out_channels, kernel_size=3, padding=1)
-#         self.attention = SelfAttention(out_channels)
-#
-#     def forward(self, x):
-#         x = self.relu(self.conv1(x))
-#         x = self.conv2(x)
-#         x = self.attention(x)
-#         return x
-
-    # 示例使用
-
-
-# # 假设输入图像大小为(3, 224, 224)
-# input_image = torch.randn(1, 3, 224, 224).cuda()
-#
-# # 初始化CNN模型
-# model = SimpleCNN(3, 32).cuda()
-#
-# # 前向传播
-# output_feature_map = model(input_image)
-#
-# # 打印输出特征图的尺寸
-# print(output_feature_map.shape)  # 输出应该是 (1, 128, 224, 224)
 
 class OneModel(nn.Module):
     def __init__(self, args, cls_type=None):
@@ -308,13 +290,13 @@ class OneModel(nn.Module):
         models.BatchNorm = BatchNorm
 
         PSPNet_ = PSPNet(args)
-        new_param = torch.load(args.pre_weight, map_location=torch.device('cpu'))['state_dict']
+        new_param = torch.load(args.pre_weight, map_location=torch.device('cpu'))#['state_dict']
         try:
-            PSPNet_.load_state_dict(new_param)
+            PSPNet_.load_state_dict(new_param, False)
         except RuntimeError:
             for key in list(new_param.keys()):
                 new_param[key[7:]] = new_param.pop(key)
-            PSPNet_.load_state_dict(new_param)
+            PSPNet_.load_state_dict(new_param, False)
         self.layer0, self.layer1, self.layer2, self.layer3, self.layer4 = PSPNet_.layer0, PSPNet_.layer1, PSPNet_.layer2, PSPNet_.layer3, PSPNet_.layer4
         self.ppm = PSPNet_.ppm
         self.cls = nn.Sequential(PSPNet_.cls[0], PSPNet_.cls[1])
@@ -385,15 +367,18 @@ class OneModel(nn.Module):
         # start1 = time.time()
         bs, channel, h, w = x.shape
         _, _, query_feat_2, query_feat_3, query_feat_4, query_feat_5 = self.extract_feats(x)
-
+        """
+        query_feat_2 [1,512,80,80]
+        query_feat_3/4/5 [1,1024/2048/512,80,80]
+        """
         if self.vgg:
             query_feat_2 = F.interpolate(query_feat_2, size=(query_feat_3.size(2), query_feat_3.size(3)),
                                          mode='bilinear', align_corners=True)
-        query_feat = torch.cat([query_feat_3, query_feat_2], 1)
-        query_feat = self.down_query(query_feat)
+        query_feat = torch.cat([query_feat_3, query_feat_2], 1) # [bs,256,80,80]
+        query_feat = self.down_query(query_feat) # [bs,256,80,80]
 
-        mask = rearrange(s_y, "b n h w -> (b n) 1 h w")
-        mask = (mask == 1).float()  # 将前景部分分割出来
+        mask = rearrange(s_y, "b n h w -> (b n) 1 h w") # (bs*shot,1,633,633)
+        mask = (mask == 1).float()  # 将前景部分分割出来 将255变成1
         # ================================= 创建与当前输入图片的前景无关但与在coco80个类别里的 negative_mask ====================================================
         # negative_mask = []
         # background_mask = (y_b==0).float()
@@ -404,20 +389,31 @@ class OneModel(nn.Module):
         #         negative_mask.append(n_mask)
 
 
-        s_x = rearrange(s_x, "b n c h w -> (b n) c h w")
+        s_x = rearrange(s_x, "b n c h w -> (b n) c h w") # [1,1,3,633,633] -> [1,3,633,633]
         supp_feat_0, supp_feat_1, supp_feat_2, supp_feat_3, supp_feat_4, supp_feat_5 = self.extract_feats(s_x, mask)
+        """
+        supp_feat_0/1 [1,128/256,159,159]
+        supp_feat_2/3/4/5 [1,512/1024/2048/512,80,80]
+        """
         if self.vgg:
             supp_feat_2 = F.interpolate(supp_feat_2, size=(supp_feat_3.size(2), supp_feat_3.size(3)), mode='bilinear',
                                         align_corners=True)
-        supp_feat = torch.cat([supp_feat_3, supp_feat_2], 1)
-        supp_feat = self.down_supp(supp_feat)
-        supp_feat_prototype = Weighted_GAP(supp_feat, \
-                                     F.interpolate(mask, size=(supp_feat_3.size(2), supp_feat_3.size(3)),
-                                                   mode='bilinear', align_corners=True))
-        supp_feat_bin = supp_feat_prototype.repeat(1, 1, supp_feat.shape[-2], supp_feat.shape[-1])
-        supp_feat_item = eval('supp_feat_' + self.low_fea_id)
-        supp_feat_item = rearrange(supp_feat_item, "(b n) c h w -> b n c h w", n=self.shot)
-        supp_feat_list = [supp_feat_item[:, i, ...] for i in range(self.shot)]
+        supp_feat = torch.cat([supp_feat_3, supp_feat_2], 1) #[bs*shot,1024+512,80,80]
+        supp_feat = self.down_supp(supp_feat) #[bs*shot,256/64,80,80]
+        supp_feat_prototype = Weighted_GAP(supp_feat, F.interpolate(mask, size=(supp_feat_3.size(2), supp_feat_3.size(3)),
+                                                   mode='bilinear', align_corners=True)) #[bs*shot,256/64,1,1]
+        supp_feat_bin = supp_feat_prototype.repeat(1, 1, supp_feat.shape[-2], supp_feat.shape[-1]) #[bs*shot,256,80,80]
+        supp_feat_item = eval('supp_feat_' + self.low_fea_id) #[1,1,512,80,80]
+        supp_feat_item = rearrange(supp_feat_item, "(b n) c h w -> b n c h w", n=self.shot) #[bs,shot,512,80,80]
+        supp_feat_list = [supp_feat_item[:, i, ...] for i in range(self.shot)] #list长度为shot, 里面的tensor：[bs,512,80,80]
+
+
+        #TODO 生产query prototype
+        #query_prototype = query_prototype_generation(ms=mask(bs*shot,1,633,633),
+        #                           fs=supp_feat(bs*shot,64,80,80),
+        #                           fq=query_feat(bs*shot,64,80,80))
+
+
 
         if self.shot == 1:
             similarity2 = get_similarity(query_feat_4, supp_feat_4, s_y)
@@ -454,7 +450,7 @@ class OneModel(nn.Module):
         # teacher_output = self.teacher_net(text)
 
         # embed = self.student_net(self.text.float())
-        # # start3 = time.time()
+        # start3 = time.time()
         # # TODO 这里的log_softmax主要是为了取对数
         # temperature = 1
         # kd_loss = nn.functional.kl_div(F.log_softmax(embed / temperature, dim=1),
@@ -475,7 +471,7 @@ class OneModel(nn.Module):
         # prototype = prototype.permute(1, 0, 2, 3)
         # bs, channel, h1, w1 = prototype.shape
         #
-        # # start5 = time.time()
+        # start5 = time.time()
         #
         # candidate_query_pro = []
         # candidate_query_pro.append(torch.mean(prototype[:, :, 0:h1 // 2, 0:w1 // 2], dim=[2, 3]))
@@ -502,7 +498,7 @@ class OneModel(nn.Module):
         # background_mask = Weighted_GAP(query_feat, F.interpolate(background_mask.unsqueeze(1),
         #                                                                  size=(query_feat.size(2), query_feat.size(3)),
         #                                                                  mode='bilinear', align_corners=True))
-        # ============================================== 计算compare_loss,最小化类内距离,最大化类间距离 ====================================================
+        # ============================================== 计算compare_loss,最小化类内距离,最大化类间距离 ======================================这部分在train的文件里面实现
         # query_prototype: [2, 64], negative_query_feat: list(2, 64)
         # if negative_query_pro == []:
         #     compare_loss = 0 #torch.zeros(query_prototype.shape[0]).cuda()
@@ -510,8 +506,8 @@ class OneModel(nn.Module):
         # else:
         #     compare_loss = cal_my_loss(query_prototype, negative_query_pro, background_mask)
         #
-        # # start7 = time.time()
-        #
+        # start7 = time.time()
+
         # query_prototype = query_prototype.unsqueeze(-1).unsqueeze(-1).expand(bs, channel, h1, w1)
         query_feat = self.CrossAttention(query_feat, supp_feat, F.interpolate(mask, query_feat.shape[-2], mode="nearest"))
         supp_feat = self.SelfAttention(supp_feat)
@@ -601,7 +597,6 @@ class OneModel(nn.Module):
             # print("9", start10 - start9)
             # print("10", start11 - start10)
             # print("11", start12 - start11)
-            #print("12", start13 - start12)
 
 
             weight_t = (y_m == 1).float()
@@ -612,7 +607,7 @@ class OneModel(nn.Module):
                 else:
                     distil_loss += self.disstil_loss(weight_t, weight)
                 weight_t = weight.detach()
-            if torch.isnan(main_loss).any() or torch.isnan(aux_loss1).any() or torch.isnan(aux_loss2).any():
+            if torch.isnan(main_loss).any() or torch.isnan(aux_loss1).any() or torch.isnan(aux_loss2).any() or torch.isnan(distil_loss).any():
                 import pdb
                 pdb.set_trace()
 

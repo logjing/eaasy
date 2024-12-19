@@ -40,7 +40,7 @@ def get_parser():
     parser = argparse.ArgumentParser(description='PyTorch Few-Shot Semantic Segmentation')
     parser.add_argument('--arch', type=str, default='HDMNet')  #
     parser.add_argument('--viz', action='store_true', default=False)
-    parser.add_argument('--config', type=str, default='config/pascal/pascal_split0_resnet50_manet.yaml',
+    parser.add_argument('--config', type=str, default='config/coco/coco_split0_resnet101_manet.yaml',
                         help='config file')  # coco/coco_split0_resnet50.yaml
     parser.add_argument('--local_rank', type=int, default=-1,
                         help='number of cpu threads to use during batch generation')

@@ -670,8 +670,6 @@ class OneModel(nn.Module):
             # print("10", start11 - start10)
             # print("11", start12 - start11)
             #print("12", start13 - start12)
-
-
             weight_t = (y_m == 1).float()
             weight_t = torch.masked_fill(weight_t, weight_t == 0, -1e9)
             for i, weight in enumerate(weights):

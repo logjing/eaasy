@@ -40,14 +40,14 @@ from util.util import AverageMeter, poly_learning_rate, intersectionAndUnionGPU,
 cv2.ocl.setUseOpenCL(False)
 scaler = GradScaler()
 amp = False
-
+logging.getLogger().setLevel(logging.INFO)
 
 def get_parser():
     parser = argparse.ArgumentParser(description='PyTorch Few-Shot Semantic Segmentation')
     parser.add_argument('--arch', type=str, default='HDMNet')  #
     parser.add_argument('--viz', action='store_true', default=False)
     parser.add_argument('--config', type=str, default='config/coco/coco_split0_resnet50_manet.yaml',
-                        help='config file')  # coco/coco_split0_resnet50.yaml
+                        help='config file')  # coco/coco_split0_resnet50.yaml 'config/pascal/pascal_split0_resnet50_manet.yaml'
     parser.add_argument('--local_rank', type=int, default=-1,
                         help='number of cpu threads to use during batch generation')
     parser.add_argument('--opts', help='see config/ade20k/ade20k_pspnet50.yaml for all options', default=None,
@@ -122,6 +122,9 @@ def main_process():
 
 
 def main():
+    global  out_list #保存上一个epoch共3000张图片的输出
+    out_list = {}
+
     global args, logger, writer
     args = get_parser()
     logger = get_logger()
@@ -347,8 +350,20 @@ def train(train_loader, val_loader, model, optimizer, epoch):
             output, query_feat, main_loss, aux_loss1, aux_loss2 = model(s_x=s_input, s_y=s_mask, x=input,
                                                                         y_m=target, y_b=target_b,
                                                                         cat_idx=subcls)
+
+            #当前epoch的mask和上个epoch的mask求损失
+            last_epoch_loss = 0.
+            if len(out_list) != 3000 or epoch <= 2 :
+                out_list[i]  = output
+            else:
+                mask_last_epoch = out_list[i]
+                mask_last_epoch[mask_last_epoch!=0] = 1
+                output[output!=0] = 1
+                last_epoch_loss = torch.sum((mask_last_epoch - output) ** 2)
+                out_list[i] = output
+                # 根据mask_last_epoch 和 output求last_epoch_loss
             pool = nn.AdaptiveAvgPool2d(1)
-            use_my_loss = True
+            use_my_loss = False
             if use_my_loss:
                 if i == 0:  # 判断query_dict是否全部是空值(从文心一言抄的)
                     for i1 in range(len(class_chosen)):  # 取出每一个batch
@@ -363,15 +378,13 @@ def train(train_loader, val_loader, model, optimizer, epoch):
 
                         myloss_class = np.zeros(80)
                         for j in (range(80)):  # 对于80个类别计算各自的距离的平均值作为loss,在后续的处理中再区分相同类别和不同类别
-                            if query_dict[j] == []:
+                            if _len_query[j] == 0:
                                 continue
                             # diff_loss = 0.0
                             # for k in query_dict[j]:
                             #     diff_loss += F.cosine_similarity(now_prototype, k, dim=0)
 
                             k = sum(query_dict[j]) / _len_query[j]
-
-                            # k = query_dict[j]
                             diff_loss = F.cosine_similarity(now_prototype, k, dim=0)
 
                             # diff_loss /= len(query_dict[j])  # 对当前类别做平均
@@ -389,7 +402,10 @@ def train(train_loader, val_loader, model, optimizer, epoch):
                     # 把写好的数据放入pkl文件中,用于t-sne分析各个类别之间是否分离
                     with open(os.path.join("E:\project\insight1\HDMNet\pkl", str(epoch) + ".pkl"), 'wb') as f:
                         pickle.dump(query_dict, f)
-            loss = main_loss + args.aux_weight1 * aux_loss1 + args.aux_weight2 * aux_loss2 + myloss
+            loss = main_loss + args.aux_weight1 * aux_loss1 + args.aux_weight2 * aux_loss2 + myloss + last_epoch_loss
+            if(torch.isnan(loss)):
+                import pdb
+                pdb.set_trace()
 
         # optimizer.zero_grad()
         if (amp):

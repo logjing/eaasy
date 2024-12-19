@@ -109,13 +109,13 @@ class OneModel(nn.Module):
         models.BatchNorm = BatchNorm
         
         PSPNet_ = PSPNet(args)
-        new_param = torch.load(args.pre_weight, map_location=torch.device('cpu'))['state_dict']
+        new_param = torch.load(args.pre_weight, map_location=torch.device('cpu'))#['state_dict']
         try: 
-            PSPNet_.load_state_dict(new_param)
+            PSPNet_.load_state_dict(new_param, False)
         except RuntimeError:                 
             for key in list(new_param.keys()):
                 new_param[key[7:]] = new_param.pop(key)
-            PSPNet_.load_state_dict(new_param)
+            PSPNet_.load_state_dict(new_param, False)
         self.layer0, self.layer1, self.layer2, self.layer3, self.layer4 = PSPNet_.layer0, PSPNet_.layer1, PSPNet_.layer2, PSPNet_.layer3, PSPNet_.layer4
         self.ppm = PSPNet_.ppm
         self.cls = nn.Sequential(PSPNet_.cls[0], PSPNet_.cls[1])
