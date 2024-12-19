@@ -3,6 +3,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
+import time
 # two_pass.py
 
 import numpy as np
@@ -92,10 +93,12 @@ def flatten(g) -> list:
     return graph
 
 def two_pass(graph):
+    start = time.time()
     graph_1, idx_dict = first_pass(graph)
     idx_dict = remap(idx_dict)
     graph_2 = second_pass(graph_1, idx_dict)
     graph_3 = flatten(graph_2)
+    print(time.time() - start)
     return graph_3
 
 if __name__ == "__main__":
