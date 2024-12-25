@@ -21,15 +21,9 @@ import time
 from torch.cuda.amp import autocast,GradScaler
 import pdb
 from util.two_pass import two_pass
+from util.query_prototype_generation import query_prototype_generation
 
 cos = nn.CosineSimilarity(dim=1,eps=1e-6)
-
-#query_prototype = query_prototype_generation(ms=mask(bs*shot,1,633,633),
-#                           fs=supp_feat(bs*shot,64,80,80),
-#                           fq=query_feat(bs*shot,64,80,80))
-
-
-
 
 
 
@@ -407,14 +401,6 @@ class OneModel(nn.Module):
         supp_feat_item = rearrange(supp_feat_item, "(b n) c h w -> b n c h w", n=self.shot) #[bs,shot,512,80,80]
         supp_feat_list = [supp_feat_item[:, i, ...] for i in range(self.shot)] #list长度为shot, 里面的tensor：[bs,512,80,80]
 
-
-        #TODO 生产query prototype
-        #query_prototype = query_prototype_generation(ms=mask(bs*shot,1,633,633),
-        #                           fs=supp_feat(bs*shot,64,80,80),
-        #                           fq=query_feat(bs*shot,64,80,80))
-
-
-
         if self.shot == 1:
             similarity2 = get_similarity(query_feat_4, supp_feat_4, s_y)
             similarity1 = get_similarity(query_feat_5, supp_feat_5, s_y)
@@ -470,26 +456,7 @@ class OneModel(nn.Module):
         # prototype = query_feat.permute(1, 0, 2, 3) * score
         # prototype = prototype.permute(1, 0, 2, 3)
         # bs, channel, h1, w1 = prototype.shape
-        #
-        # start5 = time.time()
-        #
-        # candidate_query_pro = []
-        # candidate_query_pro.append(torch.mean(prototype[:, :, 0:h1 // 2, 0:w1 // 2], dim=[2, 3]))
-        # candidate_query_pro.append(torch.mean(prototype[:, :, h1 // 2:h1, 0:w1 // 2], dim=[2, 3]))
-        # candidate_query_pro.append(torch.mean(prototype[:, :, 0:h1 // 2, w1 // 2:w1], dim=[2, 3]))
-        # candidate_query_pro.append(torch.mean(prototype[:, :, h1 // 2:h1, w1 // 2:w1], dim=[2, 3]))
-        # candidate_query_pro.append(
-        #     torch.mean(prototype[:, :, h1 // 2 - h1 // 4: h1 // 2 + h1 // 4, w1 // 2 - w1 // 4:w1 // 2 + w1 // 4],
-        #                dim=[2, 3]))
-        # candidate_query_pro = torch.cat(candidate_query_pro, dim=0).view(5, bs, channel).permute(1, 0, 2)
-        # query_prototype = cos_weighted_prototype(candidate_query_pro, instance_prototype)
-
         # start6 = time.time()
-        # TODO 2.使用query_prototype
-
-
-        # meta_out, weights = self.transformer(query_feat, supp_feat, mask, similarity)
-
         # ============================================== negative_query_prototype ====================================================
         # negative_query_pro = []
         # for n_mask in negative_mask:
@@ -498,27 +465,21 @@ class OneModel(nn.Module):
         # background_mask = Weighted_GAP(query_feat, F.interpolate(background_mask.unsqueeze(1),
         #                                                                  size=(query_feat.size(2), query_feat.size(3)),
         #                                                                  mode='bilinear', align_corners=True))
-        # ============================================== 计算compare_loss,最小化类内距离,最大化类间距离 ======================================这部分在train的文件里面实现
-        # query_prototype: [2, 64], negative_query_feat: list(2, 64)
-        # if negative_query_pro == []:
-        #     compare_loss = 0 #torch.zeros(query_prototype.shape[0]).cuda()
-        #     # compare_loss.requires_grad=False
-        # else:
-        #     compare_loss = cal_my_loss(query_prototype, negative_query_pro, background_mask)
-        #
-        # start7 = time.time()
+        # query_feat = self.CrossAttention(query_feat, supp_feat, F.interpolate(mask, query_feat.shape[-2], mode="nearest"))
+        # supp_feat = self.SelfAttention(supp_feat)
 
-        # query_prototype = query_prototype.unsqueeze(-1).unsqueeze(-1).expand(bs, channel, h1, w1)
-        query_feat = self.CrossAttention(query_feat, supp_feat, F.interpolate(mask, query_feat.shape[-2], mode="nearest"))
-        supp_feat = self.SelfAttention(supp_feat)
-
-        meta_out, weights = self.transformer(query_feat, supp_feat, mask, similarity)
+        #TODO: query_feat 换成 query_prototype
+        query_prototype = query_prototype_generation(ms=mask, fs=supp_feat, fq=query_feat)  # [2,256]
+        # query_prototype = query_prototype_generation(ms=mask(bs*shot,1,633,633),
+        #                           fs=supp_feat(bs*shot,64,80,80),
+        #                           fq=query_feat(bs*shot,64,80,80))
+        query_feat_transform = query_prototype.unsqueeze(2).unsqueeze(3).repeat(1,1,80,80)
+        # [1,64,80,80] * 2, [1,1,633,633], [1,2,80,80]
+        meta_out, weights = self.transformer(query_feat_transform, supp_feat, mask, similarity)
         base_out = self.base_learnear(query_feat_5)
 
         meta_out_soft = meta_out.softmax(1)
         base_out_soft = base_out.softmax(1)
-
-        # start8 = time.time()
 
         # K-Shot Reweighting
         bs = x.shape[0]
@@ -548,56 +509,32 @@ class OneModel(nn.Module):
         if self.training and self.cls_type == 'Base':
             # c_id_array = torch.arange(self.base_classes + 1, device='cuda')
             base_map_list = []
-
+            sum_base = base_out_soft.sum(1, True)
             for b_id in range(bs):
-                # start = time.time()
                 c_id = cat_idx[0][b_id] + 1
-                # c_mask = (c_id_array != 0) & (c_id_array != c_id)
-                #tmp = base_out_soft.sum(1,True)
-                # x = (base_out_soft.sum(1,True)[b_id] - base_out_soft[b_id][0] - base_out_soft[b_id][c_id]).unsqueeze(0)
-                # x = base_out_soft[b_id, c_mask, :, :].unsqueeze(0).sum(1, True)
-                # print("neibu", time.time() - start)
-                base_map_list.append( (base_out_soft.sum(1,True)[b_id] - base_out_soft[b_id][0] - base_out_soft[b_id][c_id]).unsqueeze(0) )
-
+                base_map_list.append( (sum_base[b_id] - base_out_soft[b_id][0] - base_out_soft[b_id][c_id]).unsqueeze(0) )
             base_map = torch.cat(base_map_list, 0)
-
         else:
             base_map = base_out_soft[:, 1:, :, :].sum(1, True)
 
         est_map = est_val.expand_as(meta_map_fg)
-
-        # start10 = time.time()
 
         meta_map_bg = self.gram_merge(torch.cat([meta_map_bg, est_map], dim=1))
         meta_map_fg = self.gram_merge(torch.cat([meta_map_fg, est_map], dim=1))
 
         merge_map = torch.cat([meta_map_bg, base_map], 1)
         merge_bg = self.cls_merge(merge_map)  # [bs, 1, 60, 60]
-        # start11 = time.time()
         final_out = torch.cat([merge_bg, meta_map_fg], dim=1)
 
         # Output Part
         meta_out = F.interpolate(meta_out, size=(h, w), mode='bilinear', align_corners=True)
         base_out = F.interpolate(base_out, size=(h, w), mode='bilinear', align_corners=True)
         final_out = F.interpolate(final_out, size=(h, w), mode='bilinear', align_corners=True)
-        # start12 = time.time()
         # Loss
         if self.training:
             main_loss = self.criterion(final_out, y_m.long())
             aux_loss1 = self.criterion(meta_out, y_m.long())
             aux_loss2 = self.criterion(base_out, y_b.long())
-            # print("1", start2 - start1)
-            # print("2", start3 - start2)
-            # print("3", start4 - start3)
-            # print("4", start5 - start4)
-            # print("5", start6 - start5)
-            # print("6", start7 - start6)
-            # print("7", start8 - start7)
-            # print("8", start9 - start8)
-            # print("9", start10 - start9)
-            # print("10", start11 - start10)
-            # print("11", start12 - start11)
-
 
             weight_t = (y_m == 1).float()
             weight_t = torch.masked_fill(weight_t, weight_t == 0, -1e9)

@@ -17,11 +17,11 @@ Train:
   padding_label: 255
   # Dataset & Mode
   split: 2
-  shot: 5
+  shot: 1
   data_set: 'coco'
   use_split_coco: True # True means FWB setting
   # Optimizer
-  batch_size: 2 # batch size for training (bs8 for 1GPU)
+  batch_size: 1 # batch size for training (bs8 for 1GPU)
   base_lr: 0.0001
   pre_weight: ./initmodel/PSPNet/coco/split0/resnet50/best.pth #./initmodel/resnet101_v2.pth #./initmodel/PSPNet/coco/split0/resnet50/best.pth #./initmodel/vgg16_bn.pth
   epochs: 50

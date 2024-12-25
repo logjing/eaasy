@@ -33,14 +33,14 @@ from util.util import AverageMeter, poly_learning_rate, intersectionAndUnionGPU,
 
 cv2.ocl.setUseOpenCL(False)
 scaler = GradScaler()
-amp = True
+amp = False
 
 
 def get_parser():
     parser = argparse.ArgumentParser(description='PyTorch Few-Shot Semantic Segmentation')
     parser.add_argument('--arch', type=str, default='HDMNet')  #
     parser.add_argument('--viz', action='store_true', default=False)
-    parser.add_argument('--config', type=str, default='config/coco/coco_split0_resnet101_manet.yaml',
+    parser.add_argument('--config', type=str, default='config/coco/coco_split0_resnet50_manet.yaml',
                         help='config file')  # coco/coco_split0_resnet50.yaml
     parser.add_argument('--local_rank', type=int, default=-1,
                         help='number of cpu threads to use during batch generation')
@@ -327,6 +327,8 @@ def train(train_loader, val_loader, model, optimizer, epoch):
             output, main_loss, aux_loss1, aux_loss2 = model(s_x=s_input, s_y=s_mask, x=input, y_m=target, y_b=target_b,
                                                             cat_idx=subcls)
             loss = main_loss + args.aux_weight1 * aux_loss1 + args.aux_weight2 * aux_loss2
+            if(torch.isnan(loss)):
+                import pdb;pdb.set_trace()
 
 
 

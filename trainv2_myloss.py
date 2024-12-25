@@ -351,7 +351,7 @@ def train(train_loader, val_loader, model, optimizer, epoch):
                                                                         y_m=target, y_b=target_b,
                                                                         cat_idx=subcls)
 
-            #当前epoch的mask和上个epoch的mask求损失
+            #--------------------------当前epoch的mask和上个epoch的mask求损失------------------------------
             last_epoch_loss = 0.
             if len(out_list) != 3000 or epoch <= 2 :
                 out_list[i]  = output
@@ -362,6 +362,8 @@ def train(train_loader, val_loader, model, optimizer, epoch):
                 last_epoch_loss = torch.sum((mask_last_epoch - output) ** 2)
                 out_list[i] = output
                 # 根据mask_last_epoch 和 output求last_epoch_loss
+            # --------------------------当前epoch的mask和上个epoch的mask求损失------------------------------
+
             pool = nn.AdaptiveAvgPool2d(1)
             use_my_loss = False
             if use_my_loss:
@@ -402,10 +404,12 @@ def train(train_loader, val_loader, model, optimizer, epoch):
                     # 把写好的数据放入pkl文件中,用于t-sne分析各个类别之间是否分离
                     with open(os.path.join("E:\project\insight1\HDMNet\pkl", str(epoch) + ".pkl"), 'wb') as f:
                         pickle.dump(query_dict, f)
+
             loss = main_loss + args.aux_weight1 * aux_loss1 + args.aux_weight2 * aux_loss2 + myloss + last_epoch_loss
             if(torch.isnan(loss)):
                 import pdb
                 pdb.set_trace()
+
 
         # optimizer.zero_grad()
         if (amp):

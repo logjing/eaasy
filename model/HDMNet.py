@@ -7,6 +7,7 @@ import model.vgg as vgg_models
 from model.PSPNet import OneModel as PSPNet
 from einops import rearrange
 import clip
+from torch.cuda.amp import autocast, GradScaler
 
 def Weighted_GAP(supp_feat, mask):
     supp_feat = supp_feat * mask
@@ -109,13 +110,13 @@ class OneModel(nn.Module):
         models.BatchNorm = BatchNorm
         
         PSPNet_ = PSPNet(args)
-        new_param = torch.load(args.pre_weight, map_location=torch.device('cpu'))#['state_dict']
+        new_param = torch.load(args.pre_weight, map_location=torch.device('cpu'))['state_dict']
         try: 
-            PSPNet_.load_state_dict(new_param, False)
+            PSPNet_.load_state_dict(new_param) #( ,False)
         except RuntimeError:                 
             for key in list(new_param.keys()):
                 new_param[key[7:]] = new_param.pop(key)
-            PSPNet_.load_state_dict(new_param, False)
+            PSPNet_.load_state_dict(new_param) #( ,False)
         self.layer0, self.layer1, self.layer2, self.layer3, self.layer4 = PSPNet_.layer0, PSPNet_.layer1, PSPNet_.layer2, PSPNet_.layer3, PSPNet_.layer4
         self.ppm = PSPNet_.ppm
         self.cls = nn.Sequential(PSPNet_.cls[0], PSPNet_.cls[1])
@@ -172,7 +173,7 @@ class OneModel(nn.Module):
 
     def forward(self, x, y_m=None, y_b=None, s_x=None, s_y=None, cat_idx=None):
         bs, channel, h, w = x.shape
-        _, _, query_feat_2, query_feat_3, query_feat_4, query_feat_5 = self.extract_feats(x)  
+        _, _, query_feat_2, query_feat_3, query_feat_4, query_feat_5 = self.extract_feats(x)
 
         if self.vgg:
             query_feat_2 = F.interpolate(query_feat_2, size=(query_feat_3.size(2),query_feat_3.size(3)), mode='bilinear', align_corners=True)
@@ -214,7 +215,11 @@ class OneModel(nn.Module):
         supp_feat = self.supp_merge(torch.cat([supp_feat, supp_feat_bin], dim=1))
         supp_feat_bin = rearrange(supp_feat_bin, "(b n) c h w -> b n c h w", n=self.shot)
         supp_feat_bin = torch.mean(supp_feat_bin, dim=1)
+
+
         query_feat = self.query_merge(torch.cat([query_feat, supp_feat_bin, similarity * 10], dim=1))
+        if(torch.isnan(query_feat).any()):
+            import pdb;pdb.set_trace()
         #TODO 1.使用query_prototype替换supp_feat_bin p201行
         
         meta_out, weights = self.transformer(query_feat, supp_feat, mask, similarity)
@@ -273,7 +278,8 @@ class OneModel(nn.Module):
         meta_out = F.interpolate(meta_out, size=(h, w), mode='bilinear', align_corners=True)
         base_out = F.interpolate(base_out, size=(h, w), mode='bilinear', align_corners=True)
         final_out = F.interpolate(final_out, size=(h, w), mode='bilinear', align_corners=True)
- 
+        if(torch.isnan(final_out).any()):
+            import pdb;pdb.set_trace()
         # Loss
         if self.training:
             main_loss = self.criterion(final_out, y_m.long())

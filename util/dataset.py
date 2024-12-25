@@ -205,8 +205,8 @@ class SemData(Dataset):
 
 
         #将data_list保存到本地中，为了结果可视化
-        with open(r"C:\Users\Administrator\Desktop\result\pascal\data_list.pkl", 'wb') as f:
-            pickle.dump(self.data_list, f)
+        # with open(r"C:\Users\Administrator\Desktop\result\pascal\data_list.pkl", 'wb') as f:
+        #     pickle.dump(self.data_list, f)
         with open(fss_sub_class_file_list_path, 'r') as f:
             f_str = f.read()
             f_str = f_str.replace("ShangJinlong/P","p").replace("/VOCdevkit2012","").replace("MIANet-main","MIANet")
@@ -342,3 +342,8 @@ class SemData(Dataset):
             total_image_list = support_image_list_ori.copy()
             total_image_list.append(raw_image)            
             return image, label, label_b, s_x, s_y, subcls_list, total_image_list, support_label_list_ori, support_label_list_ori_mask, raw_label, raw_label_b          
+
+
+"""
+
+"""
