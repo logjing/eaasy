@@ -29,7 +29,7 @@ from torch.utils.data.distributed import DistributedSampler
 from tensorboardX import SummaryWriter
 from torch.cuda.amp import autocast, GradScaler
 # from model import HDMNet
-from model import myhdmnetv2_myloss as HDMNet
+from model import hdmnet_chenloss_queryproto as HDMNet
 # from model import myhdmnetv2_myloss_cluster as HDMNet
 from util import dataset
 from util import transform, transform_tri, config
@@ -343,13 +343,12 @@ def train(train_loader, val_loader, model, optimizer, epoch):
         class_chosen = subcls[0].cuda(non_blocking=True)
 
         with autocast(enabled=amp):
-            # output, main_loss, aux_loss1, compare_loss, kd_loss = model(s_x=s_input, s_y=s_mask, x=input,
-            #                                                                 y_m=target, y_b=target_b, cat_idx=subcls)
+            output, main_loss, aux_loss1, aux_loss2 = model(s_x=s_input, s_y=s_mask, x=input, y_m=target, y_b=target_b, cat_idx=subcls)
             # loss = main_loss + args.aux_weight1 * aux_loss1 + args.aux_weight2 * compare_loss + kd_loss
             myloss = 0.0
-            output, query_feat, main_loss, aux_loss1, aux_loss2 = model(s_x=s_input, s_y=s_mask, x=input,
-                                                                        y_m=target, y_b=target_b,
-                                                                        cat_idx=subcls)
+            # output, query_feat, main_loss, aux_loss1, aux_loss2 = model(s_x=s_input, s_y=s_mask, x=input,
+            #                                                             y_m=target, y_b=target_b,
+            #                                                             cat_idx=subcls)
 
             #--------------------------当前epoch的mask和上个epoch的mask求损失------------------------------
             last_epoch_loss = 0.

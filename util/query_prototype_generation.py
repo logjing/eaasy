@@ -62,7 +62,7 @@ def query_prototype_generation(ms, fs, fq):
         support_instance_prototype = instance_prototype[i] # [k,channel]
         k = support_instance_prototype.shape[0]
         if(k==0): #如果不存在前景的mask就直接塞入五个0，表示五个query_proto相似度都是0
-            similarity_map.append(torch.tensor([.0,.0,.0,.0,.0]))
+            similarity_map.append(torch.tensor([.0,.0,.0,.0,-5]))
             continue
         sim_map = torch.zeros((5,k))
         for k1 in range(5):

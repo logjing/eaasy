@@ -10,7 +10,7 @@ import os
 import shutil
 
 def heat_map(image, mode='show', save_path=""): #将灰度图转化成热力图
-    image[image!=0] = 255 #用于mask生成
+    # image[image!=0] = 255 #用于mask生成
     # 应用颜色映射
     image1 = cv2.applyColorMap(image, cv2.COLORMAP_JET) # cv2.COLORMAP_JET
     # 显示热力图
